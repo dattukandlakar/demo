@@ -86,13 +86,74 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
     return `${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}`;
   };
 
-  // Fixed handleCapture function
-  // CameraStoryScreen.tsx
+  // Enhanced photo capture with multiple fallback methods
+  const capturePhotoWithFallbacks = async () => {
+    console.log('📸 Starting enhanced photo capture...');
+    
+    // Platform-specific options
+    const baseOptions = {
+      quality: 0.8,
+      base64: false,
+      exif: false,
+    };
+    
+    const captureOptions = Platform.OS === 'android' ? [
+      // Android-specific methods
+      { ...baseOptions, skipProcessing: false },
+      { ...baseOptions, skipProcessing: true },
+      { ...baseOptions, quality: 1.0, exif: true },
+      { quality: 0.5 }, // Minimal for Android
+    ] : [
+      // iOS-specific methods  
+      { ...baseOptions, skipProcessing: false },
+      { ...baseOptions, quality: 1.0, exif: true, skipProcessing: false },
+      { ...baseOptions, skipProcessing: true },
+      { quality: 0.7 }, // Minimal for iOS
+    ];
+    
+    for (let i = 0; i < captureOptions.length; i++) {
+      try {
+        console.log(`📸 Attempting capture method ${i + 1}:`, captureOptions[i]);
+        
+        const photo = await cameraRef.current.takePictureAsync(captureOptions[i]);
+        
+        console.log(`📷 Method ${i + 1} result:`, {
+          success: !!photo,
+          hasUri: !!photo?.uri,
+          uri: photo?.uri?.substring(0, 50) + '...' // Truncate for logging
+        });
+        
+        if (photo?.uri) {
+          console.log(`✅ Photo captured successfully with method ${i + 1}!`);
+          return photo;
+        }
+      } catch (error) {
+        console.error(`💥 Method ${i + 1} failed:`, error?.message || error);
+        if (i === captureOptions.length - 1) {
+          throw error; // Re-throw on final attempt
+        }
+        // Wait a bit before trying next method
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+    }
+    
+    throw new Error('All photo capture methods failed');
+  };
 
-// ... (existing code)
-
-const handleCapture = async () => {
+  const handleCapture = async () => {
   console.log('🔥 Capture button pressed, mode:', mode);
+  
+  // Enhanced diagnostics
+  console.log('🔍 Platform info:', {
+    OS: Platform.OS,
+    version: Platform.Version
+  });
+  
+  console.log('🔍 Permission status:', {
+    granted: permission?.granted,
+    status: permission?.status,
+    canAskAgain: permission?.canAskAgain
+  });
   
   if (!cameraRef.current || isCapturing || !isCameraReady) {
     console.error('❌ Camera not ready - ref:', !!cameraRef.current, 'capturing:', isCapturing, 'ready:', isCameraReady);
@@ -102,16 +163,37 @@ const handleCapture = async () => {
   if (mode === 'photo') {
     try {
       console.log('📸 Taking photo...');
+      console.log('📸 Camera ref status:', {
+        hasRef: !!cameraRef.current,
+        isReady: isCameraReady,
+        isCapturing: isCapturing,
+        cameraType: cameraType
+      });
+      
+      // Check if camera is available
+      const isAvailable = await CameraView.isAvailableAsync();
+      console.log('📸 Camera availability:', isAvailable);
+      
+      // Run comprehensive diagnostics
+      await checkCameraCapabilities();
+      
       setIsCapturing(true);
       onCaptureStart?.(); // Notify parent that capture started
       
-      const photo = await cameraRef.current.takePictureAsync({
-        quality: 0.8,
-        base64: false,
-        exif: false,
-      });
+      // Add a small delay to ensure camera is fully ready
+      await new Promise(resolve => setTimeout(resolve, 200));
       
-      console.log('📷 Photo result:', photo ? 'Success' : 'Failed', photo?.uri);
+      console.log('📸 About to call enhanced photo capture...');
+      
+      const photo = await capturePhotoWithFallbacks();
+      
+      console.log('📷 Final photo result:', {
+        success: !!photo,
+        hasUri: !!photo?.uri,
+        uri: photo?.uri,
+        width: photo?.width,
+        height: photo?.height
+      });
       
       if (photo?.uri) {
         console.log('✅ Photo captured successfully, URI:', photo.uri);
@@ -127,9 +209,76 @@ const handleCapture = async () => {
         
       } else {
         console.error('❌ No photo URI received from camera');
+        console.error('❌ Full photo object:', photo);
+        
+        // Try alternative capture method
+        console.log('🔄 Trying alternative capture method...');
+        try {
+          const alternativePhoto = await cameraRef.current.takePictureAsync({
+            quality: 1.0,
+            base64: false,
+            exif: true,
+            skipProcessing: true,
+          });
+          
+          console.log('🔄 Alternative photo result:', alternativePhoto);
+          
+          if (alternativePhoto?.uri) {
+            console.log('✅ Alternative capture successful!');
+            const mediaObject = { 
+              uri: alternativePhoto.uri, 
+              type: 'photo' as const,
+              filter: selectedFilter 
+            };
+            onCapture(mediaObject);
+          }
+        } catch (altError) {
+          console.error('💥 Alternative capture also failed:', altError);
+        }
       }
     } catch (error) {
       console.error('💥 Failed to take photo:', error);
+      console.error('💥 Error details:', {
+        name: error?.name,
+        message: error?.message,
+        stack: error?.stack,
+        code: error?.code
+      });
+      
+      // Try to get more info about camera state
+      console.error('💥 Camera state during error:', {
+        hasRef: !!cameraRef.current,
+        isReady: isCameraReady,
+        cameraType: cameraType,
+        mode: mode
+      });
+      
+      // Attempt to restart camera for next try
+      console.log('🔄 Attempting camera restart after error...');
+      await restartCamera();
+      
+      // Final fallback: try using ImagePicker camera
+      console.log('📱 Trying ImagePicker camera as final fallback...');
+      try {
+        const result = await ImagePicker.launchCameraAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          allowsEditing: false,
+          quality: 0.8,
+        });
+
+        if (!result.canceled && result.assets[0]) {
+          console.log('✅ ImagePicker camera successful!');
+          const mediaObject = { 
+            uri: result.assets[0].uri, 
+            type: 'photo' as const,
+            filter: selectedFilter 
+          };
+          onCapture(mediaObject);
+          return; // Exit early on success
+        }
+      } catch (pickerError) {
+        console.error('💥 ImagePicker camera also failed:', pickerError);
+      }
     } finally {
       setIsCapturing(false);
     }
@@ -144,7 +293,108 @@ const handleCapture = async () => {
     }
   }
 };
-// ... (rest of the code)
+
+  // Enhanced camera diagnostics
+  const checkCameraCapabilities = async () => {
+    try {
+      console.log('🔍 Checking camera capabilities...');
+      
+      // Check basic availability
+      const isAvailable = await CameraView.isAvailableAsync();
+      console.log('📷 Camera available:', isAvailable);
+      
+      if (cameraRef.current) {
+        // Check supported features
+        const features = cameraRef.current.getSupportedFeatures();
+        console.log('📷 Supported features:', features);
+        
+        // Check available picture sizes
+        try {
+          const pictureSizes = await cameraRef.current.getAvailablePictureSizesAsync();
+          console.log('📷 Available picture sizes:', pictureSizes);
+        } catch (sizeError) {
+          console.log('📷 Could not get picture sizes:', sizeError?.message);
+        }
+      }
+      
+      // Check permissions in detail
+      console.log('🔍 Detailed permission check:', {
+        permission: permission,
+        granted: permission?.granted,
+        status: permission?.status,
+        canAskAgain: permission?.canAskAgain,
+        expires: permission?.expires
+      });
+      
+      return isAvailable;
+    } catch (error) {
+      console.error('💥 Error checking camera capabilities:', error);
+      return false;
+    }
+  };
+
+  // Comprehensive camera test function
+  const testCameraFunctionality = async () => {
+    console.log('🧪 Starting comprehensive camera test...');
+    
+    try {
+      // Test 1: Check availability
+      const isAvailable = await CameraView.isAvailableAsync();
+      console.log('🧪 Test 1 - Camera available:', isAvailable);
+      
+      if (!isAvailable) {
+        console.error('❌ Camera not available on this device');
+        return;
+      }
+      
+      // Test 2: Check ref
+      console.log('🧪 Test 2 - Camera ref exists:', !!cameraRef.current);
+      
+      if (!cameraRef.current) {
+        console.error('❌ Camera ref is null');
+        return;
+      }
+      
+      // Test 3: Check permissions
+      console.log('🧪 Test 3 - Permission status:', permission);
+      
+      // Test 4: Check ready state
+      console.log('🧪 Test 4 - Camera ready:', isCameraReady);
+      
+      // Test 5: Try simple capture
+      console.log('🧪 Test 5 - Attempting simple capture...');
+      try {
+        const testPhoto = await cameraRef.current.takePictureAsync({
+          quality: 0.5,
+        });
+        console.log('🧪 Test 5 result:', !!testPhoto?.uri ? 'SUCCESS' : 'FAILED', testPhoto?.uri?.substring(0, 30));
+      } catch (testError) {
+        console.error('🧪 Test 5 failed:', testError?.message);
+      }
+      
+    } catch (error) {
+      console.error('🧪 Camera test failed:', error);
+    }
+  };
+
+  // Camera restart function for error recovery
+  const restartCamera = async () => {
+    try {
+      console.log('🔄 Restarting camera...');
+      setIsCameraReady(false);
+      
+      // Pause and resume preview to reset camera state
+      if (cameraRef.current) {
+        await cameraRef.current.pausePreview();
+        await new Promise(resolve => setTimeout(resolve, 500));
+        await cameraRef.current.resumePreview();
+        console.log('✅ Camera restarted successfully');
+      }
+    } catch (error) {
+      console.error('💥 Failed to restart camera:', error);
+    }
+  };
+
   // Fixed video recording functions
   const handleRecordStart = async () => {
     if (!cameraRef.current || isRecording || !isCameraReady) {
@@ -323,15 +573,28 @@ const handleCapture = async () => {
           style={styles.camera} 
           facing={cameraType} 
           ref={cameraRef}
+          mode="picture"
+          enableTorch={false}
+          animateShutter={true}
           onCameraReady={() => {
             console.log('📷 Camera is ready!');
             setIsCameraReady(true);
+          }}
+          onMountError={(error) => {
+            console.error('📷 Camera mount error:', error);
+            setIsCameraReady(false);
           }}
         />
         <View style={styles.overlay}>
           <View style={styles.topControls}>
             <TouchableOpacity onPress={onClose} style={styles.topButton}>
               <Ionicons name="close" size={28} color="white" />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={restartCamera} style={styles.topButton}>
+              <Ionicons name="refresh" size={28} color="white" />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={testCameraFunctionality} style={styles.topButton}>
+              <Ionicons name="bug" size={28} color="white" />
             </TouchableOpacity>
             <TouchableOpacity onPress={() => console.log('Mute/Unmute pressed.')} style={styles.topButton}>
               <Ionicons name="volume-mute-outline" size={28} color="white" />
