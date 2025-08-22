@@ -20,9 +20,10 @@ interface CameraStoryScreenProps {
   onClose: () => void;
   onCapture: (media: { uri: string, type: 'photo' | 'video', filter?: string }) => void;
   onGalleryPress?: () => void;
+  onCaptureStart?: () => void;
 }
 
-const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose, onCapture, onGalleryPress }) => {
+const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose, onCapture, onGalleryPress, onCaptureStart }) => {
   const [permission, requestPermission] = useCameraPermissions();
   const [mediaLibraryPermission, requestMediaLibraryPermission] = MediaLibrary.usePermissions();
   const [cameraType, setCameraType] = useState<CameraType>('back');
@@ -33,6 +34,7 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
   const [mode, setMode] = useState<'photo' | 'video'>('photo');
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [isCapturing, setIsCapturing] = useState(false); // Add capturing state
+  const [isCameraReady, setIsCameraReady] = useState(false);
 
   useEffect(() => {
     let intervalId: NodeJS.Timeout;
@@ -49,6 +51,7 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
   useEffect(() => {
     if (visible) {
       loadLatestGalleryImage();
+      setIsCameraReady(false); // Reset camera ready state when opening
     }
   }, [visible]);
 
@@ -89,28 +92,29 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
 // ... (existing code)
 
 const handleCapture = async () => {
-  // console.log('🔥 Capture button pressed, mode:', mode);
+  console.log('🔥 Capture button pressed, mode:', mode);
   
-  if (!cameraRef.current || isCapturing) {
-    // console.error('❌ Camera ref not available or already capturing');
+  if (!cameraRef.current || isCapturing || !isCameraReady) {
+    console.error('❌ Camera not ready - ref:', !!cameraRef.current, 'capturing:', isCapturing, 'ready:', isCameraReady);
     return;
   }
 
   if (mode === 'photo') {
     try {
-      // console.log('📸 Taking photo...');
+      console.log('📸 Taking photo...');
       setIsCapturing(true);
+      onCaptureStart?.(); // Notify parent that capture started
       
-      const photo = await (cameraRef.current as any).takePictureAsync?.({
+      const photo = await cameraRef.current.takePictureAsync({
         quality: 0.8,
         base64: false,
         exif: false,
       });
       
-      // console.log('📷 Photo result:', photo ? 'Success' : 'Failed', photo?.uri);
+      console.log('📷 Photo result:', photo ? 'Success' : 'Failed', photo?.uri);
       
       if (photo?.uri) {
-        // console.log('✅ Photo captured successfully, URI:', photo.uri);
+        console.log('✅ Photo captured successfully, URI:', photo.uri);
         
         const mediaObject = { 
           uri: photo.uri, 
@@ -118,27 +122,24 @@ const handleCapture = async () => {
           filter: selectedFilter 
         };
         
-        // console.log('🎯 Calling onCapture and onClose with:', mediaObject);
-        
-        // This is the CRUCIAL fix:
+        console.log('🎯 Calling onCapture with:', mediaObject);
         onCapture(mediaObject);
-        onClose(); // Add this line to close the modal
         
       } else {
-        // console.error('❌ No photo URI received from camera');
+        console.error('❌ No photo URI received from camera');
       }
     } catch (error) {
-      // console.error('💥 Failed to take photo:', error);
+      console.error('💥 Failed to take photo:', error);
     } finally {
       setIsCapturing(false);
     }
   } else {
-    // Video mode (optional, but good to apply the same logic)
+    // Video mode
     if (isRecording) {
-      // console.log('⏹️ Stopping video recording...');
+      console.log('⏹️ Stopping video recording...');
       handleRecordStop();
     } else {
-      // console.log('🎬 Starting video recording...');
+      console.log('🎬 Starting video recording...');
       handleRecordStart();
     }
   }
@@ -146,24 +147,25 @@ const handleCapture = async () => {
 // ... (rest of the code)
   // Fixed video recording functions
   const handleRecordStart = async () => {
-    if (!cameraRef.current || isRecording) {
-      // console.log('❌ Cannot start recording - ref:', !!cameraRef.current, 'already recording:', isRecording);
+    if (!cameraRef.current || isRecording || !isCameraReady) {
+      console.log('❌ Cannot start recording - ref:', !!cameraRef.current, 'already recording:', isRecording, 'ready:', isCameraReady);
       return;
     }
     
     try {
-      // console.log('🎬 Starting video recording...');
+      console.log('🎬 Starting video recording...');
       setIsRecording(true);
+      onCaptureStart?.(); // Notify parent that recording started
       
-      const video = await (cameraRef.current as any).recordAsync?.({ 
+      const video = await cameraRef.current.recordAsync({ 
         maxDuration: 15,
-        quality: '720p'
+        videoQuality: '720p'
       });
       
-      // console.log('🎥 Video recording completed:', video ? 'Success' : 'Failed', video?.uri);
+      console.log('🎥 Video recording completed:', video ? 'Success' : 'Failed', video?.uri);
       
       if (video?.uri) {
-        // console.log('✅ Video recorded successfully, calling onCapture');
+        console.log('✅ Video recorded successfully, calling onCapture');
         
         const mediaObject = { 
           uri: video.uri, 
@@ -171,13 +173,13 @@ const handleCapture = async () => {
           filter: selectedFilter 
         };
         
-        // console.log('🎯 Calling onCapture with video:', mediaObject);
+        console.log('🎯 Calling onCapture with video:', mediaObject);
         onCapture(mediaObject);
       } else {
-        // console.error('❌ No video URI received');
+        console.error('❌ No video URI received');
       }
     } catch (error) {
-      // console.error('💥 Failed to record video:', error);
+      console.error('💥 Failed to record video:', error);
     } finally {
       setIsRecording(false);
     }
@@ -185,16 +187,16 @@ const handleCapture = async () => {
 
   const handleRecordStop = async () => {
     if (!cameraRef.current) {
-      // console.error('❌ Camera ref not available for stop recording');
+      console.error('❌ Camera ref not available for stop recording');
       return;
     }
     
     try {
-      // console.log('⏹️ Stopping video recording...');
-      await (cameraRef.current as any).stopRecording?.();
-      // console.log('✅ Recording stopped successfully');
+      console.log('⏹️ Stopping video recording...');
+      await cameraRef.current.stopRecording();
+      console.log('✅ Recording stopped successfully');
     } catch (error) {
-      // console.error('💥 Failed to stop recording:', error);
+      console.error('💥 Failed to stop recording:', error);
     } finally {
       setIsRecording(false);
     }
@@ -317,7 +319,15 @@ const handleCapture = async () => {
       onRequestClose={onClose}
     >
       <SafeAreaView style={styles.container}>
-        <CameraView style={styles.camera} facing={cameraType} ref={cameraRef} />
+        <CameraView 
+          style={styles.camera} 
+          facing={cameraType} 
+          ref={cameraRef}
+          onCameraReady={() => {
+            console.log('📷 Camera is ready!');
+            setIsCameraReady(true);
+          }}
+        />
         <View style={styles.overlay}>
           <View style={styles.topControls}>
             <TouchableOpacity onPress={onClose} style={styles.topButton}>
@@ -364,15 +374,15 @@ const handleCapture = async () => {
                 style={[
                   styles.captureButton, 
                   isRecording && { borderColor: '#ff3b30' },
-                  isCapturing && { opacity: 0.7 }
+                  (isCapturing || !isCameraReady) && { opacity: 0.7 }
                 ]}
                 onPress={handleCapture}
-                disabled={isCapturing}
+                disabled={isCapturing || !isCameraReady}
               >
                 <View style={[
                   styles.captureButtonInner, 
                   isRecording && { backgroundColor: '#ff3b30' },
-                  isCapturing && { backgroundColor: '#ccc' }
+                  (isCapturing || !isCameraReady) && { backgroundColor: '#ccc' }
                 ]} />
               </TouchableOpacity>
 
