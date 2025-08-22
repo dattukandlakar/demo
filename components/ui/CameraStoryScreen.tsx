@@ -119,7 +119,7 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
       console.log('📱 Camera ref null, using ImagePicker immediately...');
       try {
         const result = await ImagePicker.launchCameraAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          mediaTypes: [ImagePicker.MediaType.Images],
           allowsEditing: false,
           quality: 0.8,
         });
@@ -203,7 +203,7 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
       console.log('📱 Using ImagePicker for simple capture...');
       try {
         const result = await ImagePicker.launchCameraAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          mediaTypes: [ImagePicker.MediaType.Images],
           allowsEditing: false,
           quality: 0.8,
         });
@@ -241,6 +241,67 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
     }
   };
 
+  // Reliable photo capture using ImagePicker as primary method
+  const capturePhotoReliable = async () => {
+    console.log('📸 Using reliable ImagePicker camera...');
+    
+    try {
+      // Request camera permissions for ImagePicker
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        throw new Error('Camera permission not granted for ImagePicker');
+      }
+      
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: [ImagePicker.MediaType.Images],
+        allowsEditing: false,
+        quality: 0.8,
+        aspect: [9, 16],
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        console.log('✅ ImagePicker camera successful!');
+        return {
+          uri: result.assets[0].uri,
+          width: result.assets[0].width,
+          height: result.assets[0].height
+        };
+      } else {
+        throw new Error('ImagePicker was canceled');
+      }
+    } catch (error) {
+      console.error('💥 ImagePicker camera failed:', error);
+      throw error;
+    }
+  };
+
+  // Direct ImagePicker capture with callback
+  const handleDirectImagePicker = async () => {
+    if (isCapturing) return;
+    
+    try {
+      setIsCapturing(true);
+      onCaptureStart?.();
+      
+      const photo = await capturePhotoReliable();
+      
+      if (photo?.uri) {
+        const mediaObject = { 
+          uri: photo.uri, 
+          type: 'photo' as const,
+          filter: selectedFilter 
+        };
+        
+        console.log('✅ Direct ImagePicker capture successful');
+        onCapture(mediaObject);
+      }
+    } catch (error) {
+      console.error('💥 Direct ImagePicker failed:', error);
+    } finally {
+      setIsCapturing(false);
+    }
+  };
+
   const handleCapture = async () => {
   console.log('🔥 Capture button pressed, mode:', mode);
   
@@ -266,10 +327,12 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
     isCameraReady: isCameraReady
   });
   
-  if (isCapturing || !isCameraReady || !isCameraMounted) {
-    console.error('❌ Camera not ready - capturing:', isCapturing, 'ready:', isCameraReady, 'mounted:', isCameraMounted);
+  if (isCapturing) {
+    console.error('❌ Already capturing, please wait');
     return;
   }
+  
+  // Note: Removed camera ready/mounted checks since we use ImagePicker as primary method
 
   if (mode === 'photo') {
     try {
@@ -301,18 +364,25 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
       
       console.log('📸 About to call enhanced photo capture...');
       
-      // Try simple capture first on Android, enhanced on other platforms
+      // Use reliable ImagePicker as primary method, CameraView as secondary
       let photo;
-      if (Platform.OS === 'android') {
-        console.log('📱 Using Android-optimized capture...');
-        try {
-          photo = await capturePhotoSimple();
-        } catch (simpleError) {
-          console.log('📱 Simple capture failed, trying enhanced method...');
-          photo = await capturePhotoWithFallbacks();
-        }
+      const activeRef = cameraRef.current || stableRef.current;
+      
+      if (!activeRef) {
+        console.log('📱 No CameraView ref, using reliable ImagePicker...');
+        photo = await capturePhotoReliable();
       } else {
-        photo = await capturePhotoWithFallbacks();
+        console.log('📷 CameraView ref available, trying CameraView first...');
+        try {
+          if (Platform.OS === 'android') {
+            photo = await capturePhotoSimple();
+          } else {
+            photo = await capturePhotoWithFallbacks();
+          }
+        } catch (cameraViewError) {
+          console.log('📷 CameraView failed, falling back to ImagePicker...');
+          photo = await capturePhotoReliable();
+        }
       }
       
       console.log('📷 Final photo result:', {
@@ -614,7 +684,7 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
       // Default gallery picker
       try {
         const result = await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          mediaTypes: [ImagePicker.MediaType.Images],
           allowsEditing: true,
           aspect: [9, 16],
           quality: 0.8,
@@ -777,6 +847,9 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
             <TouchableOpacity onPress={testCameraRef} style={styles.topButton}>
               <Ionicons name="checkmark-circle" size={28} color="white" />
             </TouchableOpacity>
+            <TouchableOpacity onPress={handleDirectImagePicker} style={styles.topButton}>
+              <Ionicons name="camera" size={28} color="white" />
+            </TouchableOpacity>
             <TouchableOpacity onPress={testCameraFunctionality} style={styles.topButton}>
               <Ionicons name="bug" size={28} color="white" />
             </TouchableOpacity>
@@ -821,15 +894,15 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
                 style={[
                   styles.captureButton, 
                   isRecording && { borderColor: '#ff3b30' },
-                  (!isCameraReady || !isCameraMounted || isCapturing) && { opacity: 0.7 }
+                  isCapturing && { opacity: 0.7 }
                 ]}
                 onPress={handleCapture}
-                disabled={!isCameraReady || !isCameraMounted || isCapturing}
+                disabled={isCapturing}
               >
                 <View style={[
                   styles.captureButtonInner, 
                   isRecording && { backgroundColor: '#ff3b30' },
-                  (!isCameraReady || !isCameraMounted || isCapturing) && { backgroundColor: '#ccc' }
+                  isCapturing && { backgroundColor: '#ccc' }
                 ]} />
               </TouchableOpacity>
 
