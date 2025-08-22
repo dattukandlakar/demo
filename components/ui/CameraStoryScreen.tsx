@@ -36,10 +36,8 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
   const [isCapturing, setIsCapturing] = useState(false); // Add capturing state
   const [isCameraReady, setIsCameraReady] = useState(false);
   const [isCameraMounted, setIsCameraMounted] = useState(false);
-  const [refSetCount, setRefSetCount] = useState(0);
   const stableRef = useRef<CameraView | null>(null);
   const [cameraStableTime, setCameraStableTime] = useState<number>(0);
-  const lastRefSetTime = useRef<number>(0);
 
   useEffect(() => {
     let intervalId: NodeJS.Timeout;
@@ -58,20 +56,9 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
       loadLatestGalleryImage();
       setIsCameraReady(false); // Reset camera ready state when opening
       setIsCameraMounted(false); // Reset mounted state when opening
+      setCameraStableTime(0); // Reset stability time
       
-      // Monitor camera ref
-      const checkRef = () => {
-        console.log('🔍 Camera ref check:', {
-          hasRef: !!cameraRef.current,
-          refType: typeof cameraRef.current,
-          visible: visible
-        });
-      };
-      
-      checkRef();
-      const interval = setInterval(checkRef, 2000); // Check every 2 seconds
-      
-      return () => clearInterval(interval);
+      console.log('📷 Camera screen opened, states reset');
     }
   }, [visible]);
 
@@ -212,35 +199,19 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
     refExists: !!cameraRef,
     refCurrent: !!cameraRef.current,
     stableRefCurrent: !!stableRef.current,
-    refType: typeof cameraRef.current,
-    stableRefType: typeof stableRef.current,
     isMounted: isCameraMounted,
     isCapturing: isCapturing,
-    isCameraReady: isCameraReady,
-    refSetCount: refSetCount
+    isCameraReady: isCameraReady
   });
   
   // Use stable ref if main ref is null
   const activeRef = cameraRef.current || stableRef.current;
   
-  // Check camera stability (must be stable for at least 2 seconds)
-  const now = Date.now();
-  const timeSinceStable = now - cameraStableTime;
-  const isStable = cameraStableTime > 0 && timeSinceStable >= 2000;
-  
-  console.log('🔍 Camera stability check:', {
-    stableTime: cameraStableTime,
-    timeSinceStable,
-    isStable,
-    minStabilityMet: isStable
-  });
-  
   if (!activeRef) {
     console.error('❌ Both camera refs are null');
     console.error('❌ Ref details:', {
       mainRef: cameraRef.current,
-      stableRef: stableRef.current,
-      refSetCount: refSetCount
+      stableRef: stableRef.current
     });
     
     // Try to reinitialize camera
@@ -280,13 +251,8 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
     }
   }
   
-  if (isCapturing || !isCameraReady || !isCameraMounted || !isStable) {
-    console.error('❌ Camera not ready - capturing:', isCapturing, 'ready:', isCameraReady, 'mounted:', isCameraMounted, 'stable:', isStable);
-    
-    if (!isStable && isCameraMounted && isCameraReady) {
-      const waitTime = 2000 - timeSinceStable;
-      console.log(`⏳ Camera needs ${waitTime}ms more to be stable`);
-    }
+  if (isCapturing || !isCameraReady || !isCameraMounted) {
+    console.error('❌ Camera not ready - capturing:', isCapturing, 'ready:', isCameraReady, 'mounted:', isCameraMounted);
     
     return;
   }
@@ -736,43 +702,11 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
           style={styles.camera} 
           facing={cameraType} 
           ref={(ref) => {
-            const now = Date.now();
-            console.log('📷 Camera ref callback called:', !!ref, typeof ref, 'count:', refSetCount + 1);
+            console.log('📷 Camera ref callback called:', !!ref);
             
-            // Track timing to prevent rapid changes
-            const timeSinceLastSet = now - lastRefSetTime.current;
-            lastRefSetTime.current = now;
-            
-            console.log('📷 Ref timing:', {
-              timeSinceLastSet,
-              isRapid: timeSinceLastSet < 1000
-            });
-            
-            // Use stable ref approach
+            // Only set the refs, NO state updates to prevent infinite loops
             stableRef.current = ref;
             cameraRef.current = ref;
-            
-            // Debounce the mounted state changes
-            setRefSetCount(prev => prev + 1);
-            
-            // Only update mounted state if ref is actually set and stable
-            if (ref) {
-              // Wait longer if this is a rapid change
-              const delay = timeSinceLastSet < 1000 ? 1500 : 500;
-              setTimeout(() => {
-                // Double-check ref is still valid
-                if (stableRef.current === ref && ref) {
-                  setIsCameraMounted(true);
-                  setCameraStableTime(now);
-                  console.log('📷 Camera marked as mounted and stable');
-                }
-              }, delay);
-            } else {
-              setIsCameraMounted(false);
-              setIsCameraReady(false);
-              setCameraStableTime(0);
-              console.log('📷 Camera unmounted');
-            }
           }}
           mode="picture"
           enableTorch={false}
@@ -780,11 +714,22 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
           onCameraReady={() => {
             console.log('📷 Camera is ready!');
             console.log('📷 Camera ref at ready:', !!cameraRef.current);
-            setIsCameraReady(true);
+            
+            // Add a small delay to ensure camera is truly stable
+            setTimeout(() => {
+              if (cameraRef.current || stableRef.current) {
+                setIsCameraReady(true);
+                setIsCameraMounted(true);
+                setCameraStableTime(Date.now());
+                console.log('📷 Camera fully initialized and stable');
+              }
+            }, 1000); // 1 second delay for stability
           }}
           onMountError={(error) => {
             console.error('📷 Camera mount error:', error);
             setIsCameraReady(false);
+            setIsCameraMounted(false);
+            setCameraStableTime(0);
           }}
         />
         <View style={styles.overlay}>
@@ -842,15 +787,15 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
                 style={[
                   styles.captureButton, 
                   isRecording && { borderColor: '#ff3b30' },
-                  (isCapturing || !isCameraReady || !isCameraMounted || (cameraStableTime > 0 && (Date.now() - cameraStableTime) < 2000)) && { opacity: 0.7 }
+                  (!isCameraReady || !isCameraMounted || isCapturing) && { opacity: 0.7 }
                 ]}
                 onPress={handleCapture}
-                disabled={isCapturing || !isCameraReady || !isCameraMounted || (cameraStableTime > 0 && (Date.now() - cameraStableTime) < 2000)}
+                disabled={!isCameraReady || !isCameraMounted || isCapturing}
               >
                 <View style={[
                   styles.captureButtonInner, 
                   isRecording && { backgroundColor: '#ff3b30' },
-                  (isCapturing || !isCameraReady || !isCameraMounted || (cameraStableTime > 0 && (Date.now() - cameraStableTime) < 2000)) && { backgroundColor: '#ccc' }
+                  (!isCameraReady || !isCameraMounted || isCapturing) && { backgroundColor: '#ccc' }
                 ]} />
               </TouchableOpacity>
 
