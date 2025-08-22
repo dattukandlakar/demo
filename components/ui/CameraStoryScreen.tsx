@@ -140,6 +140,28 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
     throw new Error('All photo capture methods failed');
   };
 
+  // Simple Android-compatible photo capture
+  const capturePhotoSimple = async () => {
+    console.log('📸 Using simple photo capture method...');
+    
+    try {
+      const photo = await cameraRef.current.takePictureAsync({
+        quality: 0.8,
+      });
+      
+      console.log('📷 Simple capture result:', {
+        success: !!photo,
+        hasUri: !!photo?.uri,
+        uri: photo?.uri?.substring(0, 50) + '...'
+      });
+      
+      return photo;
+    } catch (error) {
+      console.error('💥 Simple capture failed:', error);
+      throw error;
+    }
+  };
+
   const handleCapture = async () => {
   console.log('🔥 Capture button pressed, mode:', mode);
   
@@ -170,12 +192,17 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
         cameraType: cameraType
       });
       
-      // Check if camera is available
-      const isAvailable = await CameraView.isAvailableAsync();
-      console.log('📸 Camera availability:', isAvailable);
-      
-      // Run comprehensive diagnostics
-      await checkCameraCapabilities();
+      // Check if camera is available (only on supported platforms)
+      if (Platform.OS === 'web') {
+        const isAvailable = await CameraView.isAvailableAsync();
+        console.log('📸 Camera availability:', isAvailable);
+        if (!isAvailable) {
+          console.error('❌ Camera not available on this platform');
+          return;
+        }
+      } else {
+        console.log('📸 Skipping availability check on native platform');
+      }
       
       setIsCapturing(true);
       onCaptureStart?.(); // Notify parent that capture started
@@ -185,7 +212,19 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
       
       console.log('📸 About to call enhanced photo capture...');
       
-      const photo = await capturePhotoWithFallbacks();
+      // Try simple capture first on Android, enhanced on other platforms
+      let photo;
+      if (Platform.OS === 'android') {
+        console.log('📱 Using Android-optimized capture...');
+        try {
+          photo = await capturePhotoSimple();
+        } catch (simpleError) {
+          console.log('📱 Simple capture failed, trying enhanced method...');
+          photo = await capturePhotoWithFallbacks();
+        }
+      } else {
+        photo = await capturePhotoWithFallbacks();
+      }
       
       console.log('📷 Final photo result:', {
         success: !!photo,
@@ -274,14 +313,23 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
     try {
       console.log('🔍 Checking camera capabilities...');
       
-      // Check basic availability
-      const isAvailable = await CameraView.isAvailableAsync();
-      console.log('📷 Camera available:', isAvailable);
+      // Check basic availability (only on supported platforms)
+      let isAvailable = true;
+      if (Platform.OS === 'web') {
+        isAvailable = await CameraView.isAvailableAsync();
+        console.log('📷 Camera available:', isAvailable);
+      } else {
+        console.log('📷 Assuming camera available on native platform');
+      }
       
       if (cameraRef.current) {
         // Check supported features
-        const features = cameraRef.current.getSupportedFeatures();
-        console.log('📷 Supported features:', features);
+        try {
+          const features = cameraRef.current.getSupportedFeatures();
+          console.log('📷 Supported features:', features);
+        } catch (featureError) {
+          console.log('📷 Could not get supported features:', featureError?.message);
+        }
         
         // Check available picture sizes
         try {
@@ -313,13 +361,18 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
     console.log('🧪 Starting comprehensive camera test...');
     
     try {
-      // Test 1: Check availability
-      const isAvailable = await CameraView.isAvailableAsync();
-      console.log('🧪 Test 1 - Camera available:', isAvailable);
-      
-      if (!isAvailable) {
-        console.error('❌ Camera not available on this device');
-        return;
+      // Test 1: Check availability (platform-specific)
+      let isAvailable = true;
+      if (Platform.OS === 'web') {
+        isAvailable = await CameraView.isAvailableAsync();
+        console.log('🧪 Test 1 - Camera available:', isAvailable);
+        
+        if (!isAvailable) {
+          console.error('❌ Camera not available on this device');
+          return;
+        }
+      } else {
+        console.log('🧪 Test 1 - Assuming camera available on native platform');
       }
       
       // Test 2: Check ref
