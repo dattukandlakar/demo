@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "953378614777",
+    "project_id": "connektx",
+    "storage_bucket": "connektx.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:953378614777:android:c201dfb1db8465680aa128",
+        "android_client_info": {
+          "package_name": "app.rork.connektx"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDlOkpr1SpoRGW0We3VElROF8C9rBcc7SA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
