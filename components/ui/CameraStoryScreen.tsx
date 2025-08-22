@@ -97,9 +97,47 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
   const capturePhotoWithFallbacks = async () => {
     console.log('📸 Starting enhanced photo capture...');
     
+    // Immediate ref validation with detailed logging
+    console.log('🔍 Immediate ref check:', {
+      cameraRefCurrent: !!cameraRef.current,
+      stableRefCurrent: !!stableRef.current,
+      cameraRefType: typeof cameraRef.current,
+      stableRefType: typeof stableRef.current
+    });
+    
     const activeRef = cameraRef.current || stableRef.current;
+    
     if (!activeRef) {
-      throw new Error('Camera ref is null in enhanced capture');
+      console.error('❌ Camera ref is null in enhanced capture');
+      console.error('❌ Detailed ref state:', {
+        cameraRef: cameraRef.current,
+        stableRef: stableRef.current,
+        bothNull: !cameraRef.current && !stableRef.current
+      });
+      
+      // Immediate ImagePicker fallback
+      console.log('📱 Camera ref null, using ImagePicker immediately...');
+      try {
+        const result = await ImagePicker.launchCameraAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          allowsEditing: false,
+          quality: 0.8,
+        });
+
+        if (!result.canceled && result.assets[0]) {
+          console.log('✅ ImagePicker camera successful!');
+          return {
+            uri: result.assets[0].uri,
+            width: result.assets[0].width,
+            height: result.assets[0].height
+          };
+        } else {
+          throw new Error('ImagePicker was canceled or failed');
+        }
+      } catch (pickerError) {
+        console.error('💥 ImagePicker fallback failed:', pickerError);
+        throw new Error('All camera methods failed - both CameraView and ImagePicker');
+      }
     }
     
     // Platform-specific options
@@ -157,8 +195,32 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
     console.log('📸 Using simple photo capture method...');
     
     const activeRef = cameraRef.current || stableRef.current;
+    
     if (!activeRef) {
-      throw new Error('Camera ref is null in simple capture');
+      console.error('❌ Camera ref is null in simple capture');
+      
+      // Direct ImagePicker fallback for simple capture
+      console.log('📱 Using ImagePicker for simple capture...');
+      try {
+        const result = await ImagePicker.launchCameraAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          allowsEditing: false,
+          quality: 0.8,
+        });
+
+        if (!result.canceled && result.assets[0]) {
+          console.log('✅ ImagePicker simple capture successful!');
+          return {
+            uri: result.assets[0].uri,
+            width: result.assets[0].width,
+            height: result.assets[0].height
+          };
+        }
+      } catch (pickerError) {
+        console.error('💥 ImagePicker simple capture failed:', pickerError);
+      }
+      
+      throw new Error('Camera ref is null and ImagePicker failed');
     }
     
     try {
@@ -204,56 +266,8 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
     isCameraReady: isCameraReady
   });
   
-  // Use stable ref if main ref is null
-  const activeRef = cameraRef.current || stableRef.current;
-  
-  if (!activeRef) {
-    console.error('❌ Both camera refs are null');
-    console.error('❌ Ref details:', {
-      mainRef: cameraRef.current,
-      stableRef: stableRef.current
-    });
-    
-    // Try to reinitialize camera
-    console.log('🔄 Attempting to reinitialize camera...');
-    await initializeCamera();
-    
-    // Wait and check again
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    if (!activeRef) {
-      console.error('❌ Camera ref still null after initialization attempt');
-      
-      // Final fallback: try ImagePicker immediately
-      console.log('📱 Camera ref null, using ImagePicker fallback...');
-      try {
-        const result = await ImagePicker.launchCameraAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Images,
-          allowsEditing: false,
-          quality: 0.8,
-        });
-
-        if (!result.canceled && result.assets[0]) {
-          console.log('✅ ImagePicker camera successful!');
-          const mediaObject = { 
-            uri: result.assets[0].uri, 
-            type: 'photo' as const,
-            filter: selectedFilter 
-          };
-          onCapture(mediaObject);
-          return;
-        }
-      } catch (pickerError) {
-        console.error('💥 ImagePicker camera also failed:', pickerError);
-      }
-      
-      return;
-    }
-  }
-  
   if (isCapturing || !isCameraReady || !isCameraMounted) {
     console.error('❌ Camera not ready - capturing:', isCapturing, 'ready:', isCameraReady, 'mounted:', isCameraMounted);
-    
     return;
   }
 
@@ -346,28 +360,6 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
       console.log('🔄 Attempting camera restart after error...');
       await restartCamera();
       
-      // Final fallback: try using ImagePicker camera
-      console.log('📱 Trying ImagePicker camera as final fallback...');
-      try {
-        const result = await ImagePicker.launchCameraAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Images,
-          allowsEditing: false,
-          quality: 0.8,
-        });
-
-        if (!result.canceled && result.assets[0]) {
-          console.log('✅ ImagePicker camera successful!');
-          const mediaObject = { 
-            uri: result.assets[0].uri, 
-            type: 'photo' as const,
-            filter: selectedFilter 
-          };
-          onCapture(mediaObject);
-          return; // Exit early on success
-        }
-      } catch (pickerError) {
-        console.error('💥 ImagePicker camera also failed:', pickerError);
-      }
     } finally {
       setIsCapturing(false);
     }
@@ -477,6 +469,40 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
       
     } catch (error) {
       console.error('🧪 Camera test failed:', error);
+    }
+  };
+
+  // Simple camera ref test
+  const testCameraRef = async () => {
+    console.log('🧪 Testing camera ref...');
+    
+    const activeRef = cameraRef.current || stableRef.current;
+    
+    console.log('🧪 Ref test results:', {
+      cameraRef: !!cameraRef.current,
+      stableRef: !!stableRef.current,
+      activeRef: !!activeRef,
+      refType: typeof activeRef
+    });
+    
+    if (activeRef) {
+      try {
+        // Test if ref has the required methods
+        console.log('🧪 Testing ref methods:', {
+          hasTakePicture: typeof activeRef.takePictureAsync === 'function',
+          hasRecord: typeof activeRef.recordAsync === 'function',
+          hasStop: typeof activeRef.stopRecording === 'function'
+        });
+        
+        console.log('✅ Camera ref test passed');
+        return true;
+      } catch (error) {
+        console.error('💥 Camera ref test failed:', error);
+        return false;
+      }
+    } else {
+      console.error('❌ No camera ref available for testing');
+      return false;
     }
   };
 
@@ -714,14 +740,19 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
           onCameraReady={() => {
             console.log('📷 Camera is ready!');
             console.log('📷 Camera ref at ready:', !!cameraRef.current);
+            console.log('📷 Stable ref at ready:', !!stableRef.current);
             
             // Add a small delay to ensure camera is truly stable
             setTimeout(() => {
-              if (cameraRef.current || stableRef.current) {
+              const activeRef = cameraRef.current || stableRef.current;
+              if (activeRef) {
+                console.log('📷 Camera ref confirmed valid, marking as ready');
                 setIsCameraReady(true);
                 setIsCameraMounted(true);
                 setCameraStableTime(Date.now());
                 console.log('📷 Camera fully initialized and stable');
+              } else {
+                console.error('❌ Camera ref still null in onCameraReady');
               }
             }, 1000); // 1 second delay for stability
           }}
@@ -742,6 +773,9 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
             </TouchableOpacity>
             <TouchableOpacity onPress={initializeCamera} style={styles.topButton}>
               <Ionicons name="power" size={28} color="white" />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={testCameraRef} style={styles.topButton}>
+              <Ionicons name="checkmark-circle" size={28} color="white" />
             </TouchableOpacity>
             <TouchableOpacity onPress={testCameraFunctionality} style={styles.topButton}>
               <Ionicons name="bug" size={28} color="white" />
