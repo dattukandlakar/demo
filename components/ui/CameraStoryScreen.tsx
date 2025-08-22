@@ -36,6 +36,10 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
   const [isCapturing, setIsCapturing] = useState(false); // Add capturing state
   const [isCameraReady, setIsCameraReady] = useState(false);
   const [isCameraMounted, setIsCameraMounted] = useState(false);
+  const [refSetCount, setRefSetCount] = useState(0);
+  const stableRef = useRef<CameraView | null>(null);
+  const [cameraStableTime, setCameraStableTime] = useState<number>(0);
+  const lastRefSetTime = useRef<number>(0);
 
   useEffect(() => {
     let intervalId: NodeJS.Timeout;
@@ -106,6 +110,11 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
   const capturePhotoWithFallbacks = async () => {
     console.log('📸 Starting enhanced photo capture...');
     
+    const activeRef = cameraRef.current || stableRef.current;
+    if (!activeRef) {
+      throw new Error('Camera ref is null in enhanced capture');
+    }
+    
     // Platform-specific options
     const baseOptions = {
       quality: 0.8,
@@ -131,7 +140,7 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
       try {
         console.log(`📸 Attempting capture method ${i + 1}:`, captureOptions[i]);
         
-        const photo = await cameraRef.current.takePictureAsync(captureOptions[i]);
+        const photo = await activeRef.takePictureAsync(captureOptions[i]);
         
         console.log(`📷 Method ${i + 1} result:`, {
           success: !!photo,
@@ -160,8 +169,13 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
   const capturePhotoSimple = async () => {
     console.log('📸 Using simple photo capture method...');
     
+    const activeRef = cameraRef.current || stableRef.current;
+    if (!activeRef) {
+      throw new Error('Camera ref is null in simple capture');
+    }
+    
     try {
-      const photo = await cameraRef.current.takePictureAsync({
+      const photo = await activeRef.takePictureAsync({
         quality: 0.8,
       });
       
@@ -197,18 +211,36 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
   console.log('🔍 Camera ref validation:', {
     refExists: !!cameraRef,
     refCurrent: !!cameraRef.current,
+    stableRefCurrent: !!stableRef.current,
     refType: typeof cameraRef.current,
+    stableRefType: typeof stableRef.current,
     isMounted: isCameraMounted,
     isCapturing: isCapturing,
-    isCameraReady: isCameraReady
+    isCameraReady: isCameraReady,
+    refSetCount: refSetCount
   });
   
-  if (!cameraRef || !cameraRef.current) {
-    console.error('❌ Camera ref is null or undefined');
+  // Use stable ref if main ref is null
+  const activeRef = cameraRef.current || stableRef.current;
+  
+  // Check camera stability (must be stable for at least 2 seconds)
+  const now = Date.now();
+  const timeSinceStable = now - cameraStableTime;
+  const isStable = cameraStableTime > 0 && timeSinceStable >= 2000;
+  
+  console.log('🔍 Camera stability check:', {
+    stableTime: cameraStableTime,
+    timeSinceStable,
+    isStable,
+    minStabilityMet: isStable
+  });
+  
+  if (!activeRef) {
+    console.error('❌ Both camera refs are null');
     console.error('❌ Ref details:', {
-      cameraRef: cameraRef,
-      current: cameraRef?.current,
-      type: typeof cameraRef?.current
+      mainRef: cameraRef.current,
+      stableRef: stableRef.current,
+      refSetCount: refSetCount
     });
     
     // Try to reinitialize camera
@@ -218,7 +250,7 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
     // Wait and check again
     await new Promise(resolve => setTimeout(resolve, 1000));
     
-    if (!cameraRef.current) {
+    if (!activeRef) {
       console.error('❌ Camera ref still null after initialization attempt');
       
       // Final fallback: try ImagePicker immediately
@@ -248,8 +280,14 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
     }
   }
   
-  if (isCapturing || !isCameraReady || !isCameraMounted) {
-    console.error('❌ Camera not ready - capturing:', isCapturing, 'ready:', isCameraReady, 'mounted:', isCameraMounted);
+  if (isCapturing || !isCameraReady || !isCameraMounted || !isStable) {
+    console.error('❌ Camera not ready - capturing:', isCapturing, 'ready:', isCameraReady, 'mounted:', isCameraMounted, 'stable:', isStable);
+    
+    if (!isStable && isCameraMounted && isCameraReady) {
+      const waitTime = 2000 - timeSinceStable;
+      console.log(`⏳ Camera needs ${waitTime}ms more to be stable`);
+    }
+    
     return;
   }
 
@@ -500,12 +538,16 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
       console.log('🔄 Restarting camera...');
       setIsCameraReady(false);
       
+      const activeRef = cameraRef.current || stableRef.current;
+      
       // Pause and resume preview to reset camera state
-      if (cameraRef.current) {
-        await cameraRef.current.pausePreview();
+      if (activeRef) {
+        await activeRef.pausePreview();
         await new Promise(resolve => setTimeout(resolve, 500));
-        await cameraRef.current.resumePreview();
+        await activeRef.resumePreview();
         console.log('✅ Camera restarted successfully');
+      } else {
+        console.log('⚠️ No camera ref available for restart');
       }
     } catch (error) {
       console.error('💥 Failed to restart camera:', error);
@@ -514,8 +556,10 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
 
   // Fixed video recording functions
   const handleRecordStart = async () => {
-    if (!cameraRef.current || isRecording || !isCameraReady) {
-      console.log('❌ Cannot start recording - ref:', !!cameraRef.current, 'already recording:', isRecording, 'ready:', isCameraReady);
+    const activeRef = cameraRef.current || stableRef.current;
+    
+    if (!activeRef || isRecording || !isCameraReady) {
+      console.log('❌ Cannot start recording - ref:', !!activeRef, 'already recording:', isRecording, 'ready:', isCameraReady);
       return;
     }
     
@@ -524,7 +568,7 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
       setIsRecording(true);
       onCaptureStart?.(); // Notify parent that recording started
       
-      const video = await cameraRef.current.recordAsync({ 
+      const video = await activeRef.recordAsync({ 
         maxDuration: 15,
         videoQuality: '720p'
       });
@@ -553,14 +597,16 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
   };
 
   const handleRecordStop = async () => {
-    if (!cameraRef.current) {
+    const activeRef = cameraRef.current || stableRef.current;
+    
+    if (!activeRef) {
       console.error('❌ Camera ref not available for stop recording');
       return;
     }
     
     try {
       console.log('⏹️ Stopping video recording...');
-      await cameraRef.current.stopRecording();
+      await activeRef.stopRecording();
       console.log('✅ Recording stopped successfully');
     } catch (error) {
       console.error('💥 Failed to stop recording:', error);
@@ -690,10 +736,43 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
           style={styles.camera} 
           facing={cameraType} 
           ref={(ref) => {
+            const now = Date.now();
+            console.log('📷 Camera ref callback called:', !!ref, typeof ref, 'count:', refSetCount + 1);
+            
+            // Track timing to prevent rapid changes
+            const timeSinceLastSet = now - lastRefSetTime.current;
+            lastRefSetTime.current = now;
+            
+            console.log('📷 Ref timing:', {
+              timeSinceLastSet,
+              isRapid: timeSinceLastSet < 1000
+            });
+            
+            // Use stable ref approach
+            stableRef.current = ref;
             cameraRef.current = ref;
-            setIsCameraMounted(!!ref);
-            console.log('📷 Camera ref set:', !!ref, typeof ref);
-            console.log('📷 Camera mounted:', !!ref);
+            
+            // Debounce the mounted state changes
+            setRefSetCount(prev => prev + 1);
+            
+            // Only update mounted state if ref is actually set and stable
+            if (ref) {
+              // Wait longer if this is a rapid change
+              const delay = timeSinceLastSet < 1000 ? 1500 : 500;
+              setTimeout(() => {
+                // Double-check ref is still valid
+                if (stableRef.current === ref && ref) {
+                  setIsCameraMounted(true);
+                  setCameraStableTime(now);
+                  console.log('📷 Camera marked as mounted and stable');
+                }
+              }, delay);
+            } else {
+              setIsCameraMounted(false);
+              setIsCameraReady(false);
+              setCameraStableTime(0);
+              console.log('📷 Camera unmounted');
+            }
           }}
           mode="picture"
           enableTorch={false}
@@ -763,15 +842,15 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
                 style={[
                   styles.captureButton, 
                   isRecording && { borderColor: '#ff3b30' },
-                  (isCapturing || !isCameraReady || !isCameraMounted) && { opacity: 0.7 }
+                  (isCapturing || !isCameraReady || !isCameraMounted || (cameraStableTime > 0 && (Date.now() - cameraStableTime) < 2000)) && { opacity: 0.7 }
                 ]}
                 onPress={handleCapture}
-                disabled={isCapturing || !isCameraReady || !isCameraMounted}
+                disabled={isCapturing || !isCameraReady || !isCameraMounted || (cameraStableTime > 0 && (Date.now() - cameraStableTime) < 2000)}
               >
                 <View style={[
                   styles.captureButtonInner, 
                   isRecording && { backgroundColor: '#ff3b30' },
-                  (isCapturing || !isCameraReady || !isCameraMounted) && { backgroundColor: '#ccc' }
+                  (isCapturing || !isCameraReady || !isCameraMounted || (cameraStableTime > 0 && (Date.now() - cameraStableTime) < 2000)) && { backgroundColor: '#ccc' }
                 ]} />
               </TouchableOpacity>
 
