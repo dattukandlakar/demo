@@ -35,6 +35,7 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [isCapturing, setIsCapturing] = useState(false); // Add capturing state
   const [isCameraReady, setIsCameraReady] = useState(false);
+  const [isCameraMounted, setIsCameraMounted] = useState(false);
 
   useEffect(() => {
     let intervalId: NodeJS.Timeout;
@@ -52,6 +53,21 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
     if (visible) {
       loadLatestGalleryImage();
       setIsCameraReady(false); // Reset camera ready state when opening
+      setIsCameraMounted(false); // Reset mounted state when opening
+      
+      // Monitor camera ref
+      const checkRef = () => {
+        console.log('🔍 Camera ref check:', {
+          hasRef: !!cameraRef.current,
+          refType: typeof cameraRef.current,
+          visible: visible
+        });
+      };
+      
+      checkRef();
+      const interval = setInterval(checkRef, 2000); // Check every 2 seconds
+      
+      return () => clearInterval(interval);
     }
   }, [visible]);
 
@@ -177,8 +193,63 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
     canAskAgain: permission?.canAskAgain
   });
   
-  if (!cameraRef.current || isCapturing || !isCameraReady) {
-    console.error('❌ Camera not ready - ref:', !!cameraRef.current, 'capturing:', isCapturing, 'ready:', isCameraReady);
+  // Enhanced camera ref validation
+  console.log('🔍 Camera ref validation:', {
+    refExists: !!cameraRef,
+    refCurrent: !!cameraRef.current,
+    refType: typeof cameraRef.current,
+    isMounted: isCameraMounted,
+    isCapturing: isCapturing,
+    isCameraReady: isCameraReady
+  });
+  
+  if (!cameraRef || !cameraRef.current) {
+    console.error('❌ Camera ref is null or undefined');
+    console.error('❌ Ref details:', {
+      cameraRef: cameraRef,
+      current: cameraRef?.current,
+      type: typeof cameraRef?.current
+    });
+    
+    // Try to reinitialize camera
+    console.log('🔄 Attempting to reinitialize camera...');
+    await initializeCamera();
+    
+    // Wait and check again
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    if (!cameraRef.current) {
+      console.error('❌ Camera ref still null after initialization attempt');
+      
+      // Final fallback: try ImagePicker immediately
+      console.log('📱 Camera ref null, using ImagePicker fallback...');
+      try {
+        const result = await ImagePicker.launchCameraAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          allowsEditing: false,
+          quality: 0.8,
+        });
+
+        if (!result.canceled && result.assets[0]) {
+          console.log('✅ ImagePicker camera successful!');
+          const mediaObject = { 
+            uri: result.assets[0].uri, 
+            type: 'photo' as const,
+            filter: selectedFilter 
+          };
+          onCapture(mediaObject);
+          return;
+        }
+      } catch (pickerError) {
+        console.error('💥 ImagePicker camera also failed:', pickerError);
+      }
+      
+      return;
+    }
+  }
+  
+  if (isCapturing || !isCameraReady || !isCameraMounted) {
+    console.error('❌ Camera not ready - capturing:', isCapturing, 'ready:', isCameraReady, 'mounted:', isCameraMounted);
     return;
   }
 
@@ -405,6 +476,24 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
     }
   };
 
+  // Manual camera initialization for recovery
+  const initializeCamera = async () => {
+    try {
+      console.log('🔄 Manually initializing camera...');
+      setIsCameraReady(false);
+      
+      // Force a re-render by toggling a state
+      const currentType = cameraType;
+      setCameraType(currentType === 'back' ? 'front' : 'back');
+      await new Promise(resolve => setTimeout(resolve, 500));
+      setCameraType(currentType);
+      
+      console.log('✅ Camera initialization attempted');
+    } catch (error) {
+      console.error('💥 Failed to initialize camera:', error);
+    }
+  };
+
   // Camera restart function for error recovery
   const restartCamera = async () => {
     try {
@@ -600,12 +689,18 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
         <CameraView 
           style={styles.camera} 
           facing={cameraType} 
-          ref={cameraRef}
+          ref={(ref) => {
+            cameraRef.current = ref;
+            setIsCameraMounted(!!ref);
+            console.log('📷 Camera ref set:', !!ref, typeof ref);
+            console.log('📷 Camera mounted:', !!ref);
+          }}
           mode="picture"
           enableTorch={false}
           animateShutter={true}
           onCameraReady={() => {
             console.log('📷 Camera is ready!');
+            console.log('📷 Camera ref at ready:', !!cameraRef.current);
             setIsCameraReady(true);
           }}
           onMountError={(error) => {
@@ -620,6 +715,9 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
             </TouchableOpacity>
             <TouchableOpacity onPress={restartCamera} style={styles.topButton}>
               <Ionicons name="refresh" size={28} color="white" />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={initializeCamera} style={styles.topButton}>
+              <Ionicons name="power" size={28} color="white" />
             </TouchableOpacity>
             <TouchableOpacity onPress={testCameraFunctionality} style={styles.topButton}>
               <Ionicons name="bug" size={28} color="white" />
@@ -665,15 +763,15 @@ const CameraStoryScreen: React.FC<CameraStoryScreenProps> = ({ visible, onClose,
                 style={[
                   styles.captureButton, 
                   isRecording && { borderColor: '#ff3b30' },
-                  (isCapturing || !isCameraReady) && { opacity: 0.7 }
+                  (isCapturing || !isCameraReady || !isCameraMounted) && { opacity: 0.7 }
                 ]}
                 onPress={handleCapture}
-                disabled={isCapturing || !isCameraReady}
+                disabled={isCapturing || !isCameraReady || !isCameraMounted}
               >
                 <View style={[
                   styles.captureButtonInner, 
                   isRecording && { backgroundColor: '#ff3b30' },
-                  (isCapturing || !isCameraReady) && { backgroundColor: '#ccc' }
+                  (isCapturing || !isCameraReady || !isCameraMounted) && { backgroundColor: '#ccc' }
                 ]} />
               </TouchableOpacity>
 
